@@ -20,164 +20,105 @@
  */
 package com.cardinalstar.cubicchunks.visibility;
 
-import java.util.Set;
-import java.util.function.Consumer;
-
 import javax.annotation.ParametersAreNonnullByDefault;
 
-import net.minecraft.world.ChunkCoordIntPair;
-
+import com.cardinalstar.cubicchunks.util.Consumer2D;
+import com.cardinalstar.cubicchunks.util.Consumer3D;
 import com.cardinalstar.cubicchunks.util.CubePos;
+import com.cardinalstar.cubicchunks.util.HashSet2D;
+import com.cardinalstar.cubicchunks.util.HashSet3D;
 
 @ParametersAreNonnullByDefault
-public class CuboidalCubeSelector extends CubeSelector {
+public class CuboidalCubeSelector implements CubeSelector {
 
     public static final CuboidalCubeSelector INSTANCE = new CuboidalCubeSelector();
 
     private CuboidalCubeSelector() {}
 
     @Override
-    public void forAllVisibleFrom(CubePos cubePos, int horizontalViewDistance, int verticalViewDistance,
-        Consumer<CubePos> consumer) {
+    public void forAllVisibleCubes(CubePos cubePos, int horizontalViewDistance, int verticalViewDistance,
+        Consumer3D fn) {
         int cubeX = cubePos.getX();
         int cubeY = cubePos.getY();
         int cubeZ = cubePos.getZ();
+
         for (int x = cubeX - horizontalViewDistance; x <= cubeX + horizontalViewDistance; x++) {
             for (int y = cubeY - verticalViewDistance; y <= cubeY + verticalViewDistance; y++) {
                 for (int z = cubeZ - horizontalViewDistance; z <= cubeZ + horizontalViewDistance; z++) {
-                    consumer.accept(new CubePos(x, y, z));
+                    fn.accept(x, y, z);
                 }
             }
         }
     }
 
     @Override
-    public void findChanged(CubePos oldPos, CubePos newPos, int horizontalViewDistance, int verticalViewDistance,
-        Set<CubePos> cubesToRemove, Set<CubePos> cubesToLoad, Set<ChunkCoordIntPair> columnsToRemove,
-        Set<ChunkCoordIntPair> columnsToLoad) {
-        int oldX = oldPos.getX();
-        int oldY = oldPos.getY();
-        int oldZ = oldPos.getZ();
-        int newX = newPos.getX();
-        int newY = newPos.getY();
-        int newZ = newPos.getZ();
-        int dx = newX - oldX;
-        int dy = newY - oldY;
-        int dz = newZ - oldZ;
+    public void forAllVisibleColumns(CubePos cubePos, int horizontalViewDistance, int verticalViewDistance,
+        Consumer2D fn) {
+        int cubeX = cubePos.getX();
+        int cubeZ = cubePos.getZ();
 
-        for (int currentX = newX - horizontalViewDistance; currentX <= newX + horizontalViewDistance; ++currentX) {
-            for (int currentZ = newZ - horizontalViewDistance; currentZ <= newZ + horizontalViewDistance; ++currentZ) {
-                // first handle columns
-                // is current position outside of the old render distance square?
-                if (!this.isPointWithinCubeVolume(
-                    oldX,
-                    0,
-                    oldZ,
-                    currentX,
-                    0,
-                    currentZ,
-                    horizontalViewDistance,
-                    verticalViewDistance)) {
-                    columnsToLoad.add(new ChunkCoordIntPair(currentX, currentZ));
-                }
-
-                // if we moved the current point to where it would be previously,
-                // would it be outside of current render distance square?
-                if (!this.isPointWithinCubeVolume(
-                    newX,
-                    0,
-                    newZ,
-                    currentX - dx,
-                    0,
-                    currentZ - dz,
-                    horizontalViewDistance,
-                    verticalViewDistance)) {
-                    columnsToRemove.add(new ChunkCoordIntPair(currentX - dx, currentZ - dz));
-                }
-                for (int currentY = newY - verticalViewDistance; currentY <= newY + verticalViewDistance; ++currentY) {
-                    // now handle cubes, the same way
-                    if (!this.isPointWithinCubeVolume(
-                        oldX,
-                        oldY,
-                        oldZ,
-                        currentX,
-                        currentY,
-                        currentZ,
-                        horizontalViewDistance,
-                        verticalViewDistance)) {
-                        cubesToLoad.add(new CubePos(currentX, currentY, currentZ));
-                    }
-                    if (!this.isPointWithinCubeVolume(
-                        newX,
-                        newY,
-                        newZ,
-                        currentX - dx,
-                        currentY - dy,
-                        currentZ - dz,
-                        horizontalViewDistance,
-                        verticalViewDistance)) {
-                        cubesToRemove.add(new CubePos(currentX - dx, currentY - dy, currentZ - dz));
-                    }
-                }
+        for (int x = cubeX - horizontalViewDistance; x <= cubeX + horizontalViewDistance; x++) {
+            for (int z = cubeZ - horizontalViewDistance; z <= cubeZ + horizontalViewDistance; z++) {
+                fn.accept(x, z);
             }
         }
-
-        assert cubesToLoad.stream()
-            .allMatch(pos -> !cubesToRemove.contains(pos)) : "cubesToRemove contains element from cubesToLoad!";
-        assert columnsToLoad.stream()
-            .allMatch(pos -> !columnsToRemove.contains(pos)) : "columnsToRemove contains element from columnsToLoad!";
     }
 
     @Override
-    public void findAllUnloadedOnViewDistanceDecrease(CubePos playerPos, int oldHorizontalViewDistance,
-        int newHorizontalViewDistance, int oldVerticalViewDistance, int newVerticalViewDistance,
-        Set<CubePos> cubesToUnload, Set<ChunkCoordIntPair> columnsToUnload) {
-        int playerCubeX = playerPos.getX();
-        int playerCubeY = playerPos.getY();
-        int playerCubeZ = playerPos.getZ();
+    public WorldVisibilityChange findChanged(CubePos oldPos, CubePos newPos, int oldHorizontalView, int oldVerticalView,
+        int newHorizontalView, int newVerticalView) {
+        HashSet3D visCubesOld = new HashSet3D();
+        forAllVisibleCubes(oldPos, oldHorizontalView, oldVerticalView, visCubesOld::add);
 
-        for (int cubeX = playerCubeX - oldHorizontalViewDistance; cubeX
-            <= playerCubeX + oldHorizontalViewDistance; cubeX++) {
-            for (int cubeZ = playerCubeZ - oldHorizontalViewDistance; cubeZ
-                <= playerCubeZ + oldHorizontalViewDistance; cubeZ++) {
-                if (!isPointWithinCubeVolume(
-                    playerCubeX,
-                    0,
-                    playerCubeZ,
-                    cubeX,
-                    0,
-                    cubeZ,
-                    newHorizontalViewDistance,
-                    newVerticalViewDistance)) {
-                    columnsToUnload.add(new ChunkCoordIntPair(cubeX, cubeZ));
-                }
-                for (int cubeY = playerCubeY - oldVerticalViewDistance; cubeY
-                    <= playerCubeY + oldVerticalViewDistance; cubeY++) {
-                    if (!isPointWithinCubeVolume(
-                        playerCubeX,
-                        playerCubeY,
-                        playerCubeZ,
-                        cubeX,
-                        cubeY,
-                        cubeZ,
-                        newHorizontalViewDistance,
-                        newVerticalViewDistance)) {
-                        cubesToUnload.add(new CubePos(cubeX, cubeY, cubeZ));
-                    }
-                }
+        HashSet2D visColsOld = new HashSet2D();
+        forAllVisibleColumns(oldPos, oldHorizontalView, oldVerticalView, visColsOld::add);
+
+        HashSet3D visCubesNew = new HashSet3D();
+        forAllVisibleCubes(newPos, newHorizontalView, newVerticalView, visCubesNew::add);
+
+        HashSet2D visColsNew = new HashSet2D();
+        forAllVisibleColumns(newPos, newHorizontalView, newVerticalView, visColsNew::add);
+
+        WorldVisibilityChange result = new WorldVisibilityChange();
+
+        visColsOld.forEach((x, z) -> {
+            if (!visColsNew.contains(x, z)) {
+                result.columnsToUnload.add(x, z);
             }
-        }
+        });
+
+        visCubesOld.forEach((x, y, z) -> {
+            if (!visCubesNew.contains(x, y, z)) {
+                result.cubesToUnload.add(x, y, z);
+            }
+        });
+
+        visColsNew.forEach((x, z) -> {
+            if (!visColsOld.contains(x, z)) {
+                result.columnsToLoad.add(x, z);
+            }
+        });
+
+        visCubesNew.forEach((x, y, z) -> {
+            if (!visCubesOld.contains(x, y, z)) {
+                result.cubesToLoad.add(x, y, z);
+            }
+        });
+
+        return result;
     }
 
-    private boolean isPointWithinCubeVolume(int cubeX, int cubeY, int cubeZ, int pointX, int pointY, int pointZ,
-        int horizontal, int vertical) {
-        int dx = cubeX - pointX;
-        int dy = cubeY - pointY;
-        int dz = cubeZ - pointZ;
-        return dx >= -horizontal && dx <= horizontal
-            && dy >= -vertical
-            && dy <= vertical
-            && dz >= -horizontal
-            && dz <= horizontal;
+    @Override
+    public boolean contains(CubePos playerPos, int horizontalViewDistance, int verticalViewDistance, int x, int y,
+        int z) {
+        return Math.abs(playerPos.getX() - x) <= horizontalViewDistance
+            && Math.abs(playerPos.getY() - y) <= verticalViewDistance
+            && Math.abs(playerPos.getZ() - z) <= horizontalViewDistance;
+    }
+
+    @Override
+    public boolean contains(CubePos playerPos, int horizontalViewDistance, int x, int z) {
+        return Math.abs(playerPos.getX() - x) <= horizontalViewDistance
+            && Math.abs(playerPos.getZ() - z) <= horizontalViewDistance;
     }
 }

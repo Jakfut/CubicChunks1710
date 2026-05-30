@@ -24,6 +24,7 @@ import static com.cardinalstar.cubicchunks.util.Coords.blockToCube;
 import static com.cardinalstar.cubicchunks.util.Coords.blockToLocal;
 
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 
@@ -36,16 +37,17 @@ import net.minecraft.entity.Entity;
 import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.AxisAlignedBB;
 import net.minecraft.util.MathHelper;
+import net.minecraft.world.ChunkPosition;
 import net.minecraft.world.EnumSkyBlock;
 import net.minecraft.world.World;
 import net.minecraft.world.chunk.Chunk;
 import net.minecraft.world.chunk.storage.ExtendedBlockStorage;
 import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.event.world.ChunkEvent;
 import net.minecraftforge.event.world.ChunkEvent.Load;
 
 import org.spongepowered.asm.mixin.Final;
-import org.spongepowered.asm.mixin.Implements;
-import org.spongepowered.asm.mixin.Interface;
+import org.spongepowered.asm.mixin.Intrinsic;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Mutable;
 import org.spongepowered.asm.mixin.Overwrite;
@@ -60,16 +62,13 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.Slice;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
-import org.spongepowered.asm.mixin.injection.callback.LocalCapture;
 
 import com.cardinalstar.cubicchunks.CubicChunksConfig;
 import com.cardinalstar.cubicchunks.api.IColumn;
 import com.cardinalstar.cubicchunks.api.ICube;
 import com.cardinalstar.cubicchunks.api.IHeightMap;
 import com.cardinalstar.cubicchunks.mixin.api.ICubicWorldInternal;
-import com.cardinalstar.cubicchunks.util.Coords;
 import com.cardinalstar.cubicchunks.util.Mods;
-import com.cardinalstar.cubicchunks.world.api.IMinMaxHeight;
 import com.cardinalstar.cubicchunks.world.column.ColumnTileEntityMap;
 import com.cardinalstar.cubicchunks.world.column.CubeMap;
 import com.cardinalstar.cubicchunks.world.column.EmptyEBS;
@@ -81,62 +80,46 @@ import com.cardinalstar.cubicchunks.world.cube.BlankCube;
 import com.cardinalstar.cubicchunks.world.cube.Cube;
 import com.llamalad7.mixinextras.expression.Definition;
 import com.llamalad7.mixinextras.expression.Expression;
+import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+import com.llamalad7.mixinextras.sugar.Local;
 
 /**
  * Modifies vanilla code in Chunk to use Cubes
  */
 // TODO: redirect isChunkLoaded where needed
+@SuppressWarnings("MissingOrInvalidOpcode")
 @ParametersAreNonnullByDefault
 @Mixin(value = Chunk.class, priority = 999)
-// soft implements for IColumn and IColumnInternal
-// we can't implement them directly as that causes FG6+ to reobfuscate IColumn#getHeightValue(int, int)
-// into vanilla SRG name, which breaks API and mixins
-@Implements({ @Interface(iface = IColumn.class, prefix = "chunk$"),
-    @Interface(iface = IColumnInternal.class, prefix = "chunk_internal$") })
-public abstract class MixinChunk_Cubes {
+public abstract class MixinChunk implements IColumn, IColumnInternal {
 
     @Shadow
-    @Final
     private ExtendedBlockStorage[] storageArrays;
 
-    @Shadow
-    private boolean hasEntities;
     @Shadow
     @Final
     public int xPosition;
     @Shadow
     @Final
     public int zPosition;
-    @Shadow
-    @Final
-    private List<Entity>[] entityLists;
 
     @Shadow
-    @Final
     @Mutable
-    public Map<net.minecraft.world.ChunkPosition, net.minecraft.tileentity.TileEntity> chunkTileEntityMap;
+    public Map<ChunkPosition, TileEntity> chunkTileEntityMap;
 
     @Shadow
-    @Final
-    private int[] heightMap;
+    public int[] heightMap;
     @Shadow
-    @Final
-    private World worldObj;
+    public World worldObj;
     @Shadow
-    private boolean isChunkLoaded;
+    public boolean isChunkLoaded;
     @Shadow
-    private boolean isLightPopulated;
+    public boolean isLightPopulated;
     @Shadow
-    private boolean isModified;
+    public boolean isModified;
     @Shadow
-    private boolean field_150815_m;
-    /*
-     * WARNING: WHEN YOU RENAME ANY OF THESE 3 FIELDS RENAME CORRESPONDING
-     * FIELDS IN "cubicchunks.asm.mixin.core.client.MixinChunk_Cubes" and
-     * "cubicchunks.mixin.early.common.MixinChunk_Columns".
-     */
+    public boolean field_150815_m;
     @Unique
     private CubeMap cubeMap;
     @Unique
@@ -145,20 +128,11 @@ public abstract class MixinChunk_Cubes {
     private Cube cachedCube; // todo: make it always nonnull using BlankCube
     @Unique
     private StagingHeightMap stagingHeightMap;
+    @Unique
     private boolean isColumn = false;
-
-    private Block[] compatGenerationBlockArray;
-    private byte[] compatGenerationByteArray;
 
     @Shadow
     public abstract byte[] getBiomeArray();
-
-    @SuppressWarnings({ "deprecation", "RedundantSuppression" })
-    @Shadow
-    public abstract int getHeightValue(int x, int z);
-
-    @Shadow
-    public abstract int getSavedLightValue(EnumSkyBlock p_76614_1_, int p_76614_2_, int p_76614_3_, int p_76614_4_);
 
     @Shadow
     public boolean isTerrainPopulated;
@@ -175,7 +149,7 @@ public abstract class MixinChunk_Cubes {
     @Nullable
     private ExtendedBlockStorage getEBS_CubicChunks(int index) {
         if (!isColumn) {
-            return storageArrays[blockToCube(index)];
+            return storageArrays[index];
         }
         if (cachedCube != null && cachedCube.getY() == index) {
             return cachedCube.getStorage();
@@ -191,13 +165,11 @@ public abstract class MixinChunk_Cubes {
     // setEBS is unlikely to be used extremely frequently, no caching
     @Unique
     private void setEBS_CubicChunks(int index, ExtendedBlockStorage ebs) {
-        if (!isColumn) {
-            // vanilla case, subtract minHeight for extended height support
-            storageArrays[index - blockToCube(getWorldObj().getMinHeight())] = ebs;
-            return;
-        }
         if (index >= 0 && index < 16) {
             storageArrays[index] = ebs;
+        }
+        if (!isColumn) {
+            return;
         }
         if (cachedCube != null && cachedCube.getY() == index) {
             cachedCube.setStorage(ebs);
@@ -224,35 +196,13 @@ public abstract class MixinChunk_Cubes {
         }
     }
 
-    // modify vanilla:
-
-    // @ModifyConstant(
-    // method = "<init>(Lnet/minecraft/world/World;II)V",
-    // constant = @Constant(intValue = 16),
-    // slice = @Slice(
-    // to = @At(
-    // value = "FIELD",
-    // target =
-    // "Lnet/minecraft/world/chunk/Chunk;storageArrays:[Lnet/minecraft/world/chunk/storage/ExtendedBlockStorage;",
-    // opcode = Opcodes.PUTFIELD)),
-    // allow = 1,
-    // require = 1)
-    // private int modifySectionArrayLength(int sixteen, World worldIn, int x, int z) {
-    // if (worldIn == null) {
-    // // Some mods construct chunks with null world, ignore them
-    // return sixteen;
-    // }
-    // IMinMaxHeight y = (IMinMaxHeight) worldIn;
-    // return Coords.blockToCube(y.getMaxHeight()) - Coords.blockToCube(y.getMinHeight());
-    // }
-
     @Inject(method = "<init>(Lnet/minecraft/world/World;II)V", at = @At(value = "RETURN"))
     private void cubicChunkColumn_construct(World world, int x, int z, CallbackInfo cbi) {
+        // noinspection ConstantValue
         if (world == null) {
             // Some mods construct chunks with null world, ignore them
             return;
         }
-        // this.lightManager = world.getLightingManager();
 
         this.cubeMap = new CubeMap();
         // clientside we don't really need that much data. we actually only need top and bottom block Y positions
@@ -263,91 +213,11 @@ public abstract class MixinChunk_Cubes {
         }
         this.stagingHeightMap = new StagingHeightMap();
         // instead of redirecting access to this map, just make the map do the work
-        this.chunkTileEntityMap = new ColumnTileEntityMap((IColumn) this);
-
-        // this.chunkSections = null;
-        // this.skylightUpdateMap = null;
+        this.chunkTileEntityMap = new ColumnTileEntityMap(this);
 
         if (!Mods.ChunkAPI.isModLoaded()) {
             Arrays.fill(getBiomeArray(), (byte) -1);
         }
-    }
-
-    @Redirect(
-        method = "<init>(Lnet/minecraft/world/World;[Lnet/minecraft/block/Block;II)V",
-        at = @At(
-            value = "FIELD",
-            args = "array=get",
-            target = "Lnet/minecraft/world/chunk/Chunk;storageArrays:[Lnet/minecraft/world/chunk/storage/ExtendedBlockStorage;"))
-    private ExtendedBlockStorage init_getStorage(ExtendedBlockStorage[] ebs, int y) {
-        return ebs[y - (this.isColumn ? 0 : blockToCube(((IMinMaxHeight) worldObj).getMinHeight()))];
-    }
-
-    @Redirect(
-        method = "<init>(Lnet/minecraft/world/World;[Lnet/minecraft/block/Block;II)V",
-        at = @At(
-            value = "FIELD",
-            args = "array=set",
-            target = "Lnet/minecraft/world/chunk/Chunk;storageArrays:[Lnet/minecraft/world/chunk/storage/ExtendedBlockStorage;"))
-    private void init_getMaxHeight(ExtendedBlockStorage[] ebs, int y, ExtendedBlockStorage val) {
-        ebs[y - (this.isColumn ? 0 : blockToCube(((IMinMaxHeight) worldObj).getMinHeight()))] = val;
-    }
-
-    @ModifyConstant(
-        method = "<init>(Lnet/minecraft/world/World;[Lnet/minecraft/block/Block;[BII)V",
-        constant = @Constant(intValue = 16, ordinal = 0),
-        require = 1)
-    private int getInitChunkLoopEnd(int _16, World world, Block[] blocks, byte[] metaDatas, int x, int z) {
-        if (((ICubicWorldInternal.Server) world).isCompatGenerationScope()) {
-            this.compatGenerationBlockArray = blocks;
-            this.compatGenerationByteArray = metaDatas;
-            return -1;
-        }
-        return _16;
-    }
-
-    public void chunk_internal$setColumn(boolean isColumn) {
-        this.isColumn = isColumn;
-    }
-
-    public Block[] chunk_internal$getCompatGenerationBlockArray() {
-        return compatGenerationBlockArray;
-    }
-
-    public byte[] chunk_internal$getCompatGenerationByteArray() {
-        return compatGenerationByteArray;
-    }
-
-    // this method can't be saved by just redirecting EBS access
-    @Inject(method = "getTopFilledSegment", at = @At(value = "HEAD"), cancellable = true)
-    private void getTopFilledSegment_CubicChunks(CallbackInfoReturnable<Integer> cbi) {
-        if (!isColumn) {
-            return;
-        }
-        int blockY = Coords.NO_HEIGHT;
-        for (int localX = 0; localX < Cube.SIZE; localX++) {
-            for (int localZ = 0; localZ < Cube.SIZE; localZ++) {
-                int y = this.opacityIndex.getTopBlockY(localX, localZ);
-                if (y > blockY) {
-                    blockY = y;
-                }
-            }
-        }
-        if (blockY < getWorldObj().getMinHeight()) {
-            // PANIC!
-            // this column doesn't have any blocks in it that aren't air!
-            // but we can't return null here because vanilla code expects there to be a surface down there somewhere
-            // we don't actually know where the surface is yet, because maybe it hasn't been generated
-            // but we do know that the surface has to be at least at sea level,
-            // so let's go with that for now and hope for the best
-
-            int ret = Coords.cubeToMinBlock(blockToCube(this.getWorldObj().provider.getAverageGroundLevel()));
-            cbi.setReturnValue(ret);
-            return;
-        }
-        int ret = Coords.cubeToMinBlock(blockToCube(blockY)); // return the lowest block in the Cube (kinda weird I
-                                                              // know)
-        cbi.setReturnValue(ret);
     }
 
     /*
@@ -381,17 +251,6 @@ public abstract class MixinChunk_Cubes {
         }
     }
 
-    @Nullable
-    @Redirect(
-        method = "generateSkylightMap",
-        at = @At(
-            value = "FIELD",
-            target = "Lnet/minecraft/world/chunk/Chunk;storageArrays:[Lnet/minecraft/world/chunk/storage/ExtendedBlockStorage;",
-            args = "array=get"))
-    private ExtendedBlockStorage generateSkylightMapRedirectEBSAccess(ExtendedBlockStorage[] array, int index) {
-        return getEBS_CubicChunks(index);
-    }
-
     // ==============================================
     // propagateSkylightOcclusion
     // ==============================================
@@ -422,7 +281,7 @@ public abstract class MixinChunk_Cubes {
     /**
      * Modifies the flag variable so that the code always gets into the branch with Chunk.relightBlock redirected below
      */
-    @ModifyVariable(method = "func_150807_a", at = @At(value = "STORE"), ordinal = 0, name = "flag")
+    @ModifyVariable(method = "func_150807_a", at = @At(value = "STORE"), name = "flag")
     private boolean setBlockStateInjectGenerateSkylightMapVanilla(boolean generateSkylight) {
         if (!isColumn) {
             return generateSkylight;
@@ -432,17 +291,13 @@ public abstract class MixinChunk_Cubes {
 
     @Inject(
         method = "func_150807_a",
-        at = @At(value = "INVOKE", target = "Lnet/minecraft/world/chunk/Chunk;relightBlock(III)V"),
-        locals = LocalCapture.CAPTURE_FAILHARD)
+        at = @At(value = "INVOKE", target = "Lnet/minecraft/world/chunk/Chunk;relightBlock(III)V"))
     private void setBlockState_CubicChunks_relightBlockReplace(int localX, int localY, int localZ, Block p_150807_4_,
-        int newMeta, CallbackInfoReturnable<Boolean> cir, int packedXZ, int oldHeightValue, Block oldBlock, int oldMeta,
-        ExtendedBlockStorage ebs, boolean createdNewEbsAboveTop, int globalX, int globalZ, int oldOpacity,
-        int newOpacity) {
-
-        if (isColumn && ((IColumn) this).getCube(blockToCube(localY))
+        int newMeta, CallbackInfoReturnable<Boolean> cir, @Local(name = "j1") int oldHeightValue) {
+        if (isColumn && this.getCube(blockToCube(localY))
             .isInitialLightingDone()) {
-            if (oldHeightValue == localY + 1) { // oldHeightValue is the previous block Y above the top block, so this
-                                                // is the "removing a block" case
+            // oldHeightValue is the previous block Y above the top block, so this is the "removing a block" case
+            if (oldHeightValue == localY + 1) {
                 getWorldObj().getLightingManager()
                     .doOnBlockSetLightUpdates(
                         (Chunk) (Object) this,
@@ -481,16 +336,21 @@ public abstract class MixinChunk_Cubes {
     // getBlockLightOpacity
     // ==============================================
 
-    // TODO Maybe check this. For some reason there is no isLoaded check on this.
-    // @Redirect(method = "func_150808_b(III)I", at = @At(value = "FIELD", target =
-    // "Lnet/minecraft/world/chunk/Chunk;isChunkLoaded:Z"))
-    // private boolean getBlockLightOpacity_isChunkLoadedCubeRedirect(Chunk chunk, int x, int y, int z) {
-    // if (!isColumn) {
-    // return isChunkLoaded;
-    // }
-    // ICube cube = ((IColumn) this).getLoadedCube(blockToCube(y));
-    // return cube != null && cube.isCubeLoaded();
-    // }
+    @Unique
+    private void markDirty(Cube cube) {
+        this.isModified = true;
+        cube.markDirty();
+    }
+
+    @Unique
+    private void markDirty(int cubeY) {
+        this.isModified = true;
+
+        if (isColumn) {
+            this.getCube(cubeY)
+                .markDirty();
+        }
+    }
 
     // ==============================================
     // getBlock
@@ -503,7 +363,8 @@ public abstract class MixinChunk_Cubes {
             args = "array=length",
             target = "Lnet/minecraft/world/chunk/Chunk;storageArrays:[Lnet/minecraft/world/chunk/storage/ExtendedBlockStorage;"))
     private int getBlock_getMaxHeight(ExtendedBlockStorage[] ebs) {
-        return isColumn ? Integer.MAX_VALUE : (ebs.length - blockToCube(getWorldObj().getMinHeight()));
+        // Always return MAX_VALUE to no-op comparison, and rely on getBlock_getStorage to detect cube presence
+        return Integer.MAX_VALUE;
     }
 
     @Redirect(
@@ -513,7 +374,7 @@ public abstract class MixinChunk_Cubes {
             args = "array=get",
             target = "Lnet/minecraft/world/chunk/Chunk;storageArrays:[Lnet/minecraft/world/chunk/storage/ExtendedBlockStorage;"))
     private ExtendedBlockStorage getBlock_getStorage(ExtendedBlockStorage[] ebs, int y) {
-        return isColumn ? getEBS_CubicChunks(y) : ebs[y];
+        return getEBS_CubicChunks(y);
     }
 
     // ==============================================
@@ -527,7 +388,8 @@ public abstract class MixinChunk_Cubes {
             args = "array=length",
             target = "Lnet/minecraft/world/chunk/Chunk;storageArrays:[Lnet/minecraft/world/chunk/storage/ExtendedBlockStorage;"))
     private int getBlockMetadata_getMaxHeight(ExtendedBlockStorage[] ebs) {
-        return isColumn ? Integer.MAX_VALUE : (ebs.length - blockToCube(getWorldObj().getMinHeight()));
+        // Always return MAX_VALUE to no-op comparison, and rely on getBlockMetadata_getStorage to detect cube presence
+        return Integer.MAX_VALUE;
     }
 
     @Redirect(
@@ -556,11 +418,9 @@ public abstract class MixinChunk_Cubes {
             return;
         }
 
-        this.isModified = true;
-        ICube cube = ((IColumn) this).getCube(blockToCube(y));
-        cube.markDirty();
+        markDirty(blockToCube(y));
 
-        if (cube.isSurfaceTracked()) {
+        if (getCube(blockToCube(y)).isSurfaceTracked()) {
             opacityIndex.onOpacityChange(blockToLocal(x), y, blockToLocal(z), block.getLightOpacity());
             getWorldObj().getLightingManager()
                 .onHeightUpdate(x + 16 * this.xPosition, y, z + 16 * this.zPosition);
@@ -594,12 +454,7 @@ public abstract class MixinChunk_Cubes {
         at = @At(value = "FIELD", target = "Lnet/minecraft/world/chunk/Chunk;isModified:Z"))
     private void setIsModifiedFromSetBlockWithMeta_Field(Chunk chunk, boolean isModifiedIn, int x, int y, int z,
         Block block, int meta) {
-        if (isColumn) {
-            ICube cube = ((IColumn) this).getCube(blockToCube(y));
-            cube.markDirty();
-        } else {
-            isModified = isModifiedIn;
-        }
+        markDirty(blockToCube(y));
     }
 
     // ==============================================
@@ -617,12 +472,11 @@ public abstract class MixinChunk_Cubes {
         if (!isColumn) {
             return;
         }
-        Block block = getEBS_CubicChunks(blockToCube(y))
-            .getBlockByExtId(Coords.blockToLocal(x), Coords.blockToLocal(y), Coords.blockToLocal(z)); // TODO WATCH
 
-        this.isModified = true;
-        ICube cube = ((IColumn) this).getCube(blockToCube(y));
-        cube.markDirty();
+        Cube cube = this.getCube(blockToCube(y));
+        markDirty(cube);
+
+        Block block = cube.getBlock(x, y, z);
 
         if (cube.isSurfaceTracked()) {
             opacityIndex.onOpacityChange(blockToLocal(x), y, blockToLocal(z), block.getLightOpacity());
@@ -648,29 +502,26 @@ public abstract class MixinChunk_Cubes {
         at = @At(value = "FIELD", target = "Lnet/minecraft/world/chunk/Chunk;isModified:Z"))
     private void setIsModifiedFromSetBlockMetadata_Field(Chunk chunk, boolean isModifiedIn, int x, int y, int z,
         int meta) {
-        if (isColumn) {
-            ICube cube = ((IColumn) this).getCube(blockToCube(y));
-            cube.markDirty();
-        } else {
-            isModified = isModifiedIn;
-        }
+        markDirty(blockToCube(y));
     }
 
     // ==============================================
     // getLightFor
     // ==============================================
 
-    @Inject(method = "getSavedLightValue", at = @At("HEAD"), cancellable = true)
-    private void replacedGetSavedLightValueForCC(EnumSkyBlock type, int x, int y, int z,
-        CallbackInfoReturnable<Integer> cir) {
+    @WrapMethod(method = "getSavedLightValue")
+    private int replacedGetSavedLightValueForCC(EnumSkyBlock type, int x, int y, int z, Operation<Integer> original) {
         if (!isColumn) {
-            return;
+            return original.call(type, x, y, z);
         }
+
         if (((ICubicWorldInternal) worldObj).getLightingManager() != null) {
             ((ICubicWorldInternal) worldObj).getLightingManager()
                 .onGetLight(type, x, y, z);
         }
-        cir.setReturnValue(((Cube) ((IColumn) this).getCube(blockToCube(y))).getCachedLightFor(type, x, y, z));
+
+        return this.getCube(blockToCube(y))
+            .getCachedLightFor(type, x, y, z);
     }
 
     @Nullable
@@ -693,6 +544,7 @@ public abstract class MixinChunk_Cubes {
         if (!isColumn) {
             return;
         }
+
         if (getWorldObj().getLightingManager() != null) {
             getWorldObj().getLightingManager()
                 .onGetLightSubtracted(x, y, z);
@@ -700,7 +552,7 @@ public abstract class MixinChunk_Cubes {
     }
 
     // ==============================================
-    // setLightFor
+    // setLightValue
     // ==============================================
 
     @Redirect(
@@ -709,7 +561,6 @@ public abstract class MixinChunk_Cubes {
             value = "FIELD",
             target = "Lnet/minecraft/world/chunk/Chunk;storageArrays:[Lnet/minecraft/world/chunk/storage/ExtendedBlockStorage;",
             args = "array=get"))
-    @Nullable
     private ExtendedBlockStorage setLightValue_CubicChunks_EBSGetRedirect(ExtendedBlockStorage[] array, int index) {
         ExtendedBlockStorage ebs = getEBS_CubicChunks(index);
 
@@ -731,12 +582,7 @@ public abstract class MixinChunk_Cubes {
         at = @At(value = "FIELD", target = "Lnet/minecraft/world/chunk/Chunk;isModified:Z"))
     private void setIsModifiedFromSetLightValue_Field(Chunk chunk, boolean isModifiedIn, EnumSkyBlock type, int x,
         int y, int z, int value) {
-        if (isColumn) {
-            ICube cube = ((IColumn) this).getCube(blockToCube(y));
-            cube.markDirty();
-        } else {
-            isModified = isModifiedIn;
-        }
+        markDirty(blockToCube(y));
     }
 
     // ==============================================
@@ -764,7 +610,9 @@ public abstract class MixinChunk_Cubes {
         constant = @Constant(expandZeroConditions = Constant.Condition.LESS_THAN_ZERO, intValue = 0),
         require = 1)
     private int addEntity_getMinY(int zero) {
-        return blockToCube(getWorldObj().getMinHeight());
+        // For columns, no-op the comparison by returning min int
+        // For chunks, return 0 (the vanilla value), since it delegates to entityLists
+        return isColumn ? Integer.MIN_VALUE : 0;
     }
 
     @Redirect(
@@ -775,8 +623,9 @@ public abstract class MixinChunk_Cubes {
             target = "Lnet/minecraft/world/chunk/Chunk;entityLists:[Ljava/util/List;"),
         require = 2)
     private int addEntity_getMaxHeight(List<Entity>[] entityLists) {
-        return isColumn ? blockToCube(getWorldObj().getMaxHeight())
-            : (entityLists.length - blockToCube(getWorldObj().getMinHeight()));
+        // For columns, no-op the comparison by returning max int
+        // For chunks, return entityLists.length (the vanilla value), since it delegates to entityLists
+        return isColumn ? Integer.MAX_VALUE : entityLists.length;
     }
 
     @Redirect(
@@ -786,32 +635,14 @@ public abstract class MixinChunk_Cubes {
             args = "array=get",
             target = "Lnet/minecraft/world/chunk/Chunk;entityLists:[Ljava/util/List;"),
         require = 1)
-    private List<Entity> addEntity_getEntityList(List<Entity>[] entityLists, int idx, Entity entity) {
+    private List<Entity> addEntity_getEntityList(List<Entity>[] entityLists, int cubeY, Entity entity) {
         if (!isColumn) {
-            return entityLists[idx - blockToCube(getWorldObj().getMinHeight())];
-        } else if (cachedCube != null && cachedCube.getY() == idx) {
-            cachedCube.getEntityContainer()
-                .add(entity);
-            return null;
-        } else {
-            getWorldObj().getCubeCache()
-                .getCube(this.xPosition, idx, this.zPosition)
-                .getEntityContainer()
-                .add(entity);
-            return null;
+            // Chunks never check cubes, so use the built-in entityLists
+            return entityLists[cubeY];
         }
-    }
 
-    @Redirect(
-        method = "addEntity",
-        at = @At(value = "INVOKE", target = "Ljava/util/List;add(Ljava/lang/Object;)Z"),
-        require = 1)
-    private boolean addEntity_getEntityList(List<Object> obj, Object entity) {
-        if (!isColumn) {
-            return obj.add(entity);
-        }
-        assert obj == null;
-        return true; // ignored
+        // Get the loaded cube, or make a new one
+        return getCube(cubeY).getEntityContainer();
     }
 
     // ==============================================
@@ -826,7 +657,9 @@ public abstract class MixinChunk_Cubes {
             from = @At("HEAD"),
             to = @At(value = "INVOKE", target = "Ljava/util/List;remove(Ljava/lang/Object;)Z")))
     private int removeEntityAtIndex_getMinY(int zero) {
-        return blockToCube(getWorldObj().getMinHeight());
+        // For columns, no-op the comparison by returning min int
+        // For chunks, return 0 (the vanilla value), since it delegates to entityLists
+        return isColumn ? Integer.MIN_VALUE : 0;
     }
 
     @Redirect(
@@ -837,8 +670,9 @@ public abstract class MixinChunk_Cubes {
             target = "Lnet/minecraft/world/chunk/Chunk;entityLists:[Ljava/util/List;"),
         require = 2)
     private int removeEntityAtIndex_getMaxHeight(List<Entity>[] entityLists) {
-        return isColumn ? blockToCube(getWorldObj().getMaxHeight())
-            : (entityLists.length - blockToCube(getWorldObj().getMinHeight()));
+        // For columns, no-op the comparison by returning max int
+        // For chunks, return entityLists.length (the vanilla value), since it delegates to entityLists
+        return isColumn ? Integer.MAX_VALUE : entityLists.length;
     }
 
     @Redirect(
@@ -848,33 +682,15 @@ public abstract class MixinChunk_Cubes {
             args = "array=get",
             target = "Lnet/minecraft/world/chunk/Chunk;entityLists:[Ljava/util/List;"),
         require = 1)
-    private List<Entity> removeEntityAtIndex_getEntityList(List<Entity>[] entityLists, int idx, Entity entity,
-        int index) {
+    private List<Entity> removeEntityAtIndex_getEntityList(List<Entity>[] entityLists, int cubeY, Entity entity,
+        int $cubeY) {
         if (!isColumn) {
-            return entityLists[idx - blockToCube(getWorldObj().getMinHeight())];
-        } else if (cachedCube != null && cachedCube.getY() == idx) {
-            cachedCube.getEntityContainer()
-                .remove(entity);
-            return null;
-        } else {
-            getWorldObj().getCubeCache()
-                .getCube(this.xPosition, idx, this.zPosition)
-                .getEntityContainer()
-                .remove(entity);
-            return null;
+            // Chunks never check cubes, so use the built-in entityLists
+            return entityLists[cubeY];
         }
-    }
 
-    @Redirect(
-        method = "removeEntityAtIndex",
-        at = @At(value = "INVOKE", target = "Ljava/util/List;remove(Ljava/lang/Object;)Z"),
-        require = 1)
-    private boolean removeEntityAtIndex_getEntityList(List<Object> obj, Object entity) {
-        if (!isColumn) {
-            return obj.remove(entity);
-        }
-        assert obj == null;
-        return true; // ignored
+        // Get the loaded cube, or make a new one
+        return getCube(cubeY).getEntityContainer();
     }
 
     // ==============================================
@@ -888,7 +704,7 @@ public abstract class MixinChunk_Cubes {
         if (!isColumn) {
             return isChunkLoaded;
         }
-        ICube cube = ((IColumn) this).getLoadedCube(blockToCube(te.yCoord));
+        ICube cube = this.getLoadedCube(blockToCube(te.yCoord));
         return cube != null && cube.isCubeLoaded();
     }
 
@@ -903,7 +719,7 @@ public abstract class MixinChunk_Cubes {
         if (!isColumn) {
             return isChunkLoaded;
         }
-        ICube cube = ((IColumn) this).getLoadedCube(blockToCube(y));
+        ICube cube = this.getLoadedCube(blockToCube(y));
         return cube != null && cube.isCubeLoaded();
     }
 
@@ -936,7 +752,8 @@ public abstract class MixinChunk_Cubes {
         for (Cube cube : cubeMap) {
             cube.onCubeUnload();
         }
-        MinecraftForge.EVENT_BUS.post(new net.minecraftforge.event.world.ChunkEvent.Unload((Chunk) (Object) this));
+
+        MinecraftForge.EVENT_BUS.post(new ChunkEvent.Unload((Chunk) (Object) this));
     }
 
     // ==============================================
@@ -1025,7 +842,7 @@ public abstract class MixinChunk_Cubes {
     private void getPrecipitationHeight_CubicChunks_Replace(int x, int z, CallbackInfoReturnable<Integer> cbi) {
         if (isColumn) {
             // TODO: precipitationHeightMap
-            int ret = ((IColumn) this).getHeightValue(blockToLocal(x), 0, blockToLocal(z));
+            int ret = this.getHeightValue(blockToLocal(x), 0, blockToLocal(z));
             cbi.setReturnValue(ret);
         }
     }
@@ -1067,8 +884,8 @@ public abstract class MixinChunk_Cubes {
             endY = getWorldObj().getMaxHeight() - 1;
         }
 
-        for (int i = startY; i <= endY; i += Cube.SIZE) {
-            ExtendedBlockStorage extendedblockstorage = getEBS_CubicChunks(blockToCube(i));
+        for (int i = blockToCube(startY); i <= blockToCube(endY); i++) {
+            ExtendedBlockStorage extendedblockstorage = getEBS_CubicChunks(i);
 
             if (extendedblockstorage != null && !extendedblockstorage.isEmpty()) {
                 return false;
@@ -1118,7 +935,7 @@ public abstract class MixinChunk_Cubes {
         if (!isColumn) {
             return isChunkLoaded;
         }
-        ICube cube = ((IColumn) this).getLoadedCube(blockToCube(y));
+        ICube cube = this.getLoadedCube(blockToCube(y));
         return cube != null && cube.isCubeLoaded();
     }
 
@@ -1130,12 +947,158 @@ public abstract class MixinChunk_Cubes {
     private void enqueueRelightChecks_CubicChunks(CallbackInfo cbi) {
         if (!isColumn) {
             return;
-
         }
+
         cbi.cancel();
+
         if (CubicChunksConfig.relightChecksPerTickPerColumn > 0
             && (!worldObj.isRemote || CubicChunksConfig.doClientLightFixes)) {
             cubeMap.enqueueRelightChecks();
         }
+    }
+
+    @Override
+    public void setColumn(boolean isColumn) {
+        this.isColumn = isColumn;
+    }
+
+    @Override
+    public Cube getLoadedCube(int cubeY) {
+        if (cachedCube != null && cachedCube.getY() == cubeY) {
+            return cachedCube;
+        }
+
+        return this.cubeMap.get(cubeY);
+    }
+
+    @Override
+    public Cube getCube(int cubeY) {
+        Cube loaded = getLoadedCube(cubeY);
+
+        if (loaded != null) return loaded;
+
+        // No loaded cube, try to load or generate one
+        return getCubicWorld().getCubeCache()
+            .getCube(xPosition, cubeY, zPosition);
+    }
+
+    @Override
+    public void addCube(Cube cube) {
+        this.cubeMap.put(cube);
+
+        cube.installIntoChunk();
+    }
+
+    @Override
+    public Cube removeCube(int cubeY) {
+        if (cachedCube != null && cachedCube.getY() == cubeY) {
+            cachedCube = null;
+        }
+
+        Cube removed = this.cubeMap.remove(cubeY);
+
+        if (removed != null) {
+            removed.uninstallFromChunk();
+        }
+
+        return removed;
+    }
+
+    @Override
+    public void removeFromStagingHeightmap(ICube cube) {
+        stagingHeightMap.removeStagedCube(cube);
+    }
+
+    @Override
+    public void addToStagingHeightmap(ICube cube) {
+        stagingHeightMap.addStagedCube(cube);
+    }
+
+    @Override
+    public void recalculateStagingHeightmap() {
+        stagingHeightMap.recalculate();
+    }
+
+    @Override
+    public int getTopYWithStaging(int localX, int localZ) {
+        if (!isColumn) {
+            return heightMap[localZ << 4 | localX] - 1;
+        }
+        return Math.max(opacityIndex.getTopBlockY(localX, localZ), stagingHeightMap.getTopBlockY(localX, localZ));
+    }
+
+    @Override
+    public boolean hasLoadedCubes() {
+        return !cubeMap.isEmpty();
+    }
+
+    @Unique
+    @SuppressWarnings({ "unchecked", "AddedMixinMembersNamePattern" })
+    public <T extends World & ICubicWorldInternal> T getCubicWorld() {
+        return (T) this.worldObj;
+    }
+
+    @Override
+    public boolean shouldTick() {
+        for (Cube cube : cubeMap) {
+            if (cube.getTickets()
+                .shouldTick()) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    @Override
+    public IHeightMap getOpacityIndex() {
+        return this.opacityIndex;
+    }
+
+    @Override
+    public Collection<? extends Cube> getLoadedCubes() {
+        return this.cubeMap.all();
+    }
+
+    @Override
+    public ExtendedBlockStorage[] getTickableStorages() {
+        return this.cubeMap.getTickableStorages();
+    }
+
+    @Override
+    public Iterable<? extends Cube> getLoadedCubes(int startY, int endY) {
+        return this.cubeMap.cubes(startY, endY);
+    }
+
+    @Override
+    public void preCacheCube(Cube cube) {
+        this.cachedCube = cube;
+    }
+
+    @Override
+    @Intrinsic
+    public int getX() {
+        return xPosition;
+    }
+
+    @Override
+    @Intrinsic
+    public int getZ() {
+        return zPosition;
+    }
+
+    @Override
+    public int getHeightValue(int localX, int blockY, int localZ) {
+        return getTopYWithStaging(localX, localZ) + 1;
+    }
+
+    /**
+     * @author Barteks2x
+     * @reason go through staging heightmap
+     */
+    @Override
+    @Overwrite
+    public int getHeightValue(int localX, int localZ) {
+        return getTopYWithStaging(localX, localZ) + 1;
     }
 }

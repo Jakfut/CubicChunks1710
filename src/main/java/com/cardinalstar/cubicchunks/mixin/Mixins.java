@@ -60,6 +60,10 @@ public enum Mixins implements IMixins {
         .addCommonMixins("common.MixinBlockMushroom")
         .setPhase(Phase.EARLY)
         .setApplyIf(() -> true)),
+    MIXIN_WORLD_GEN_LAKES(new MixinBuilder("Allowing lakes to be placed above 256 and below 0.")
+        .addCommonMixins("common.MixinWorldGenLakes")
+        .setPhase(Phase.EARLY)
+        .setApplyIf(() -> true)),
     MIXIN_BLOCK_LILY_PAD(
         new MixinBuilder("Allowing lilypads to stay above 256 adn below 0.").addCommonMixins("common.MixinBlockLilyPad")
             .setPhase(Phase.EARLY)
@@ -84,27 +88,32 @@ public enum Mixins implements IMixins {
         .setApplyIf(() -> true)),
     MIXIN_S23_HEIGHTLIMITS(new MixinBuilder("Changing packet S23 for reading and writing ints to Y values")
         .addCommonMixins("common.MixinS23PacketBlockChange")
-        .setPhase(Phase.LATE)
+        .setPhase(Phase.EARLY)
         .addExcludedMod(Mods.ChunkAPI)
         .setApplyIf(() -> true)),
     MIXIN_BIOME_GEN_BASE(
         new MixinBuilder("Removes bedrock for pure cubic worlds.").addCommonMixins("common.MixinBiomeGenBase")
             .setPhase(Phase.EARLY)
             .setApplyIf(() -> true)),
-
-    // CHUNK
-    MIXIN_CHUNK_COLUMN(
-        new MixinBuilder("Mixin for making chunks into columns.").addCommonMixins("common.MixinChunk_Column")
+    MIXIN_WORLD_SERVER_DEFER_INIT(new MixinBuilder(
+        "Defer World.initialize calls for servers so that chunk loads aren't posted before the server is properly register into DimensionManager")
+            .addCommonMixins("common.MixinWorld_DeferInit", "common.MixinWorld_DeferInit$MixinWorldServer")
             .setPhase(Phase.EARLY)
             .setApplyIf(() -> true)),
-    MIXIN_CHUNK_CUBES(new MixinBuilder("Mixin to make it so that chunk methods are redirected to cubes.")
-        .addCommonMixins("common.MixinChunk_Cubes")
+
+    // CHUNK
+    MIXIN_CHUNK(new MixinBuilder("Various modifications to inject cubes, height map patches, etc into Chunks.")
+        .addCommonMixins("common.MixinChunk")
         .setPhase(Phase.EARLY)
         .setApplyIf(() -> true)),
     MIXIN_CHUNK_CACHE_HEIGHT_LIMITS(new MixinBuilder("Mixin to fix height limits in ChunkCache")
         .addCommonMixins("common.MixinChunkCache_HeightLimits")
         .setPhase(Phase.EARLY)
         .setApplyIf(() -> true)),
+    MIXIN_CHUNK_METAKEY(
+        new MixinBuilder("Mixin to implement MetaContainer on Chunk").addCommonMixins("common.MixinChunk_MetaKey")
+            .setPhase(Phase.EARLY)
+            .setApplyIf(() -> true)),
 
     // ITEM
     MIXIN_ITEM_BLOCK(

@@ -20,11 +20,9 @@
  */
 package com.cardinalstar.cubicchunks.network;
 
-import java.util.Collection;
-import java.util.List;
-
 import javax.annotation.ParametersAreNonnullByDefault;
 
+import net.minecraft.world.World;
 import net.minecraft.world.chunk.Chunk;
 import net.minecraft.world.chunk.NibbleArray;
 import net.minecraft.world.chunk.storage.ExtendedBlockStorage;
@@ -77,61 +75,59 @@ class WorldEncoder {
         }
     }
 
-    static void encodeCubes(CCPacketBuffer out, Collection<Cube> cubes) {
+    static void encodeCube(CCPacketBuffer out, Cube cube) {
         final boolean capi = Mods.ChunkAPI.isModLoaded();
 
-        byte[] buffer;
+        byte[] buffer = null;
+
         if (capi) {
             buffer = getBuffer(DataRegistryImpl.maxPacketSizeCubic());
-        } else {
-            buffer = new byte[0];
         }
-        for (Cube cube : cubes) {
-            ExtendedBlockStorage storage = cube.getStorage();
 
-            boolean empty = storage == null || cube.isEmpty();
+        ExtendedBlockStorage storage = cube.getStorage();
 
-            byte flags = 0;
-            if (empty) flags |= 0b1;
+        boolean empty = storage == null || cube.isEmpty();
 
-            // 1. emptiness
-            out.writeByte(flags);
+        byte flags = 0;
+        if (empty) flags |= 0b1;
 
-            if (!empty && !capi) {
-                // 2. block IDs and metadata
-                out.writeBytes(storage.getBlockLSBArray());
-                NibbleArray msb = storage.getBlockMSBArray();
+        // 1. emptiness
+        out.writeByte(flags);
 
-                out.writeBoolean(msb != null);
-                if (msb != null) {
-                    out.writeBytes(msb.data);
-                }
+        if (!empty && !capi) {
+            // 2. block IDs and metadata
+            out.writeBytes(storage.getBlockLSBArray());
+            NibbleArray msb = storage.getBlockMSBArray();
 
-                out.writeBytes(storage.getMetadataArray().data);
-
-                // 3. block light
-                out.writeBytes(storage.getBlocklightArray().data);
-
-                // 4. sky light
-                if (!cube.getWorld().provider.hasNoSky) {
-                    out.writeBytes(storage.getSkylightArray().data);
-                }
+            out.writeBoolean(msb != null);
+            if (msb != null) {
+                out.writeBytes(msb.data);
             }
 
-            // 5. heightmap and bottom-block-y. Each non-empty cube has a chance to update this data.
-            // Trying to keep track of when it changes would be complex, so send all cubes
-            if (!empty) {
-                ((IColumnInternal) cube.getColumn()).writeHeightmapDataForClient(out);
+            out.writeBytes(storage.getMetadataArray().data);
+
+            // 3. block light
+            out.writeBytes(storage.getBlocklightArray().data);
+
+            // 4. sky light
+            if (!cube.getWorld().provider.hasNoSky) {
+                out.writeBytes(storage.getSkylightArray().data);
             }
+        }
 
-            // 6. biomes
-            cube.writeBiomeArray(out);
+        // 5. heightmap and bottom-block-y. Each non-empty cube has a chance to update this data.
+        // Trying to keep track of when it changes would be complex, so send all cubes
+        if (!empty) {
+            ((IColumnInternal) cube.getColumn()).writeHeightmapDataForClient(out);
+        }
 
-            if (!empty && capi) {
-                int written = DataRegistryImpl.writeToBufferCubic(cube.getColumn(), storage, buffer);
+        // 6. biomes
+        cube.writeBiomeArray(out);
 
-                out.writeByteArray(buffer, 0, written);
-            }
+        if (!empty && capi) {
+            int written = DataRegistryImpl.writeToBufferCubic(cube.getColumn(), storage, buffer);
+
+            out.writeByteArray(buffer, 0, written);
         }
     }
 
@@ -146,7 +142,7 @@ class WorldEncoder {
         return buffer;
     }
 
-    static void decodeCube(CCPacketBuffer in, List<Cube> cubes) {
+    static void decodeCube(CCPacketBuffer in, Cube cube, World world) {
         final boolean capi = Mods.ChunkAPI.isModLoaded();
 
         int[] oldHeights = new int[Cube.SIZE * Cube.SIZE];
@@ -158,93 +154,83 @@ class WorldEncoder {
             buffer = new byte[0];
         }
 
-        for (int i = 0; i < cubes.size(); i++) {
-            Cube cube = cubes.get(i);
+        byte flags = in.readByte();
 
-            if (cube == null) continue;
+        boolean empty = (flags & 0b1) != 0;
 
-            cube.setClientCube();
+        ExtendedBlockStorage storage = null;
 
-            byte flags = in.readByte();
+        if (!empty) {
+            storage = new ExtendedBlockStorage(Coords.cubeToMinBlock(cube.getY()), !cube.getWorld().provider.hasNoSky);
+        }
 
-            boolean empty = (flags & 0b1) != 0;
+        cube.setStorageFromSave(storage);
 
-            ExtendedBlockStorage storage = null;
+        if (!empty && !capi) {
+            // 2. Block IDs and metadata
+            byte[] lsbData = storage.getBlockLSBArray();
+            in.readBytes(lsbData);
 
-            if (!empty) {
-                storage = new ExtendedBlockStorage(
-                    Coords.cubeToMinBlock(cube.getY()),
-                    !cube.getWorld().provider.hasNoSky);
+            boolean hasMsb = in.readBoolean();
+            if (hasMsb) {
+                if (storage.getBlockMSBArray() == null) {
+                    storage.createBlockMSBArray();
+                }
+
+                byte[] msbData = storage.getBlockMSBArray().data;
+                in.readBytes(msbData);
+            }
+            byte[] meta = storage.getMetadataArray().data;
+            in.readBytes(meta);
+
+            // 3. block light
+            in.readBytes(storage.getBlocklightArray().data);
+
+            // 4. sky light
+            if (!cube.getWorld().provider.hasNoSky) {
+                in.readBytes(storage.getSkylightArray().data);
+            }
+        }
+
+        if (!empty) {
+            // 5. heightmaps and after all that - update ref counts
+            ILightingManager lm = ((ICubicWorldInternal) cube.getWorld()).getLightingManager();
+
+            IColumnInternal column = cube.getColumn();
+            ClientHeightMap coi = (ClientHeightMap) column.getOpacityIndex();
+            for (int dx = 0; dx < Cube.SIZE; dx++) {
+                for (int dz = 0; dz < Cube.SIZE; dz++) {
+                    oldHeights[AddressTools.getLocalAddress(dx, dz)] = coi.getTopBlockY(dx, dz);
+                }
             }
 
-            cube.setStorageFromSave(storage);
+            column.loadClientHeightmapData(in);
 
-            if (!empty && !capi) {
-                // 2. Block IDs and metadata
-                byte[] lsbData = storage.getBlockLSBArray();
-                in.readBytes(lsbData);
-
-                boolean hasMsb = in.readBoolean();
-                if (hasMsb) {
-                    if (storage.getBlockMSBArray() == null) {
-                        storage.createBlockMSBArray();
-                    }
-
-                    byte[] msbData = storage.getBlockMSBArray().data;
-                    in.readBytes(msbData);
-                }
-                byte[] meta = storage.getMetadataArray().data;
-                in.readBytes(meta);
-
-                // 3. block light
-                in.readBytes(storage.getBlocklightArray().data);
-
-                // 4. sky light
-                if (!cube.getWorld().provider.hasNoSky) {
-                    in.readBytes(storage.getSkylightArray().data);
-                }
-            }
-
-            if (!empty) {
-                // 5. heightmaps and after all that - update ref counts
-                ILightingManager lm = ((ICubicWorldInternal) cube.getWorld()).getLightingManager();
-
-                IColumnInternal column = cube.getColumn();
-                ClientHeightMap coi = (ClientHeightMap) column.getOpacityIndex();
-                for (int dx = 0; dx < Cube.SIZE; dx++) {
-                    for (int dz = 0; dz < Cube.SIZE; dz++) {
-                        oldHeights[AddressTools.getLocalAddress(dx, dz)] = coi.getTopBlockY(dx, dz);
-                    }
-                }
-
-                column.loadClientHeightmapData(in);
-
-                for (int dx = 0; dx < Cube.SIZE; dx++) {
-                    for (int dz = 0; dz < Cube.SIZE; dz++) {
-                        int oldY = oldHeights[AddressTools.getLocalAddress(dx, dz)];
-                        int newY = coi.getTopBlockY(dx, dz);
-                        if (oldY != newY) {
-                            lm.updateLightBetween(cube.getColumn(), dx, oldY, newY, dz);
-                        }
+            for (int dx = 0; dx < Cube.SIZE; dx++) {
+                for (int dz = 0; dz < Cube.SIZE; dz++) {
+                    int oldY = oldHeights[AddressTools.getLocalAddress(dx, dz)];
+                    int newY = coi.getTopBlockY(dx, dz);
+                    if (oldY != newY) {
+                        lm.updateLightBetween(cube.getColumn(), dx, oldY, newY, dz);
                     }
                 }
             }
+        }
 
-            // 6. biomes
-            cube.readBiomeArray(in);
+        // 6. biomes
+        cube.readBiomeArray(in);
 
-            if (!empty && capi) {
-                try {
-                    DataRegistryImpl.readFromBufferCubic(cube.getColumn(), storage, in.readByteArray(buffer));
-                } catch (Throwable t) {
-                    CubicChunks.LOGGER
-                        .error("Error decoding ChunkAPI data ({},{},{})", cube.getX(), cube.getY(), cube.getZ(), t);
-                }
+        if (!empty && capi) {
+            try {
+                DataRegistryImpl.readFromBufferCubic(cube.getColumn(), storage, in.readByteArray(buffer));
+            } catch (Throwable t) {
+                CubicChunks.LOGGER
+                    .error("Error decoding ChunkAPI data ({},{},{})", cube.getX(), cube.getY(), cube.getZ(), t);
             }
+        }
 
-            if (!empty) {
-                storage.removeInvalidBlocks();
-            }
+        if (!empty) {
+            storage.removeInvalidBlocks();
         }
     }
 }

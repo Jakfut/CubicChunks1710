@@ -42,11 +42,6 @@ import cpw.mods.fml.common.registry.GameRegistry;
 @Config(modid = CubicChunks.MODID, category = "general")
 public class CubicChunksConfig {
 
-    @Config.Comment("Eliminates a few data copies in compatibility generator. May break some mods."
-        + " Disable if you experience issues in modded dimensions or world types")
-    @Config.LangKey("cubicchunks.config.optimized_compatibility_generator")
-    public static boolean optimizedCompatibilityGenerator = true;
-
     @Config.Ignore
     public static Map<Integer, FillerInfo> configuredDimensionalFillerMap = new HashMap<>();
 

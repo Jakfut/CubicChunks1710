@@ -76,7 +76,7 @@ public class StagingHeightMap implements IHeightMap {
         }
     }
 
-    private int index(int localX, int localZ) {
+    private static int index(int localX, int localZ) {
         return (localZ << 4) | localX;
     }
 
@@ -94,6 +94,8 @@ public class StagingHeightMap implements IHeightMap {
 
     @Override
     public int getTopBlockY(int localX, int localZ) {
+        if (stagedCubes.isEmpty()) return Coords.NO_HEIGHT;
+
         int idx = index(localX, localZ);
         if (!dirtyFlag.get(idx)) {
             return heightmap[idx];

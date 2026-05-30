@@ -1,36 +1,38 @@
-package com.cardinalstar.cubicchunks.world.column;/*
-                                                   * This file is part of Cubic Chunks Mod, licensed under the MIT
-                                                   * License (MIT).
-                                                   * Copyright (c) 2015-2021 OpenCubicChunks
-                                                   * Copyright (c) 2015-2021 contributors
-                                                   * Permission is hereby granted, free of charge, to any person
-                                                   * obtaining a copy
-                                                   * of this software and associated documentation files (the
-                                                   * "Software"), to deal
-                                                   * in the Software without restriction, including without limitation
-                                                   * the rights
-                                                   * to use, copy, modify, merge, publish, distribute, sublicense,
-                                                   * and/or sell
-                                                   * copies of the Software, and to permit persons to whom the Software
-                                                   * is
-                                                   * furnished to do so, subject to the following conditions:
-                                                   * The above copyright notice and this permission notice shall be
-                                                   * included in
-                                                   * all copies or substantial portions of the Software.
-                                                   * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-                                                   * EXPRESS OR
-                                                   * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-                                                   * MERCHANTABILITY,
-                                                   * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
-                                                   * SHALL THE
-                                                   * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
-                                                   * OTHER
-                                                   * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
-                                                   * ARISING FROM,
-                                                   * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-                                                   * DEALINGS IN
-                                                   * THE SOFTWARE.
-                                                   */
+/*
+ * This file is part of Cubic Chunks Mod, licensed under the MIT
+ * License (MIT).
+ * Copyright (c) 2015-2021 OpenCubicChunks
+ * Copyright (c) 2015-2021 contributors
+ * Permission is hereby granted, free of charge, to any person
+ * obtaining a copy
+ * of this software and associated documentation files (the
+ * "Software"), to deal
+ * in the Software without restriction, including without limitation
+ * the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell
+ * copies of the Software, and to permit persons to whom the Software
+ * is
+ * furnished to do so, subject to the following conditions:
+ * The above copyright notice and this permission notice shall be
+ * included in
+ * all copies or substantial portions of the Software.
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+ * SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+ * OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ * ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN
+ * THE SOFTWARE.
+ */
+
+package com.cardinalstar.cubicchunks.world.column;
 
 import java.util.Collection;
 import java.util.Collections;
@@ -46,15 +48,17 @@ import net.minecraft.util.AxisAlignedBB;
 import net.minecraft.world.EnumSkyBlock;
 import net.minecraft.world.World;
 import net.minecraft.world.chunk.Chunk;
+import net.minecraft.world.chunk.storage.ExtendedBlockStorage;
 
 import com.cardinalstar.cubicchunks.api.IColumn;
 import com.cardinalstar.cubicchunks.api.ICube;
 import com.cardinalstar.cubicchunks.api.IHeightMap;
 import com.cardinalstar.cubicchunks.world.cube.BlankCube;
+import com.cardinalstar.cubicchunks.world.cube.Cube;
 
 public class EmptyColumn extends Chunk implements IColumn {
 
-    private final ICube emptyCube;
+    private final Cube emptyCube;
 
     public EmptyColumn(World worldIn, int x, int z) {
         super(worldIn, x, z);
@@ -93,34 +97,39 @@ public class EmptyColumn extends Chunk implements IColumn {
     }
 
     // @Override
-    public Collection<? extends ICube> getLoadedCubes() {
+    public Collection<? extends Cube> getLoadedCubes() {
         return Collections.emptyList();
     }
 
+    @Override
+    public ExtendedBlockStorage[] getTickableStorages() {
+        return CubeMap.ZERO_LEN_EBS_ARRAY;
+    }
+
     // @Override
-    public Iterable<? extends ICube> getLoadedCubes(int startY, int endY) {
+    public Iterable<? extends Cube> getLoadedCubes(int startY, int endY) {
         return Collections.emptyList();
     }
 
     @Nullable
     // @Override
-    public ICube getLoadedCube(int cubeY) {
+    public Cube getLoadedCube(int cubeY) {
         return null;
     }
 
     // @Override
-    public ICube getCube(int cubeY) {
+    public Cube getCube(int cubeY) {
         return emptyCube;
     }
 
     // @Override
-    public void addCube(ICube cube) {
+    public void addCube(Cube cube) {
         throw new RuntimeException("This should never be called!");
     }
 
     @Nullable
     // @Override
-    public ICube removeCube(int cubeY) {
+    public Cube removeCube(int cubeY) {
         return null;
     }
 
@@ -130,7 +139,7 @@ public class EmptyColumn extends Chunk implements IColumn {
     }
 
     // @Override
-    public void preCacheCube(ICube cube) {
+    public void preCacheCube(Cube cube) {
 
     }
 
