@@ -409,7 +409,10 @@ public class CubeLoaderServer implements ICubeLoader {
         }
 
         for (ColumnInfo column : pendingColumnUnloads) {
-            unloadColumn(column);
+            // Cube load callbacks may repopulate a column after it was selected for GC.
+            if (column.containedCubes.isEmpty()) {
+                unloadColumn(column);
+            }
         }
 
         CubicChunks.LOGGER.trace(

@@ -221,6 +221,10 @@ public enum Mixins implements IMixins {
         .addCommonMixins("common.MixinNetHandlerPlayServer")
         .setPhase(Phase.EARLY)
         .setApplyIf(() -> true)),
+    MIXIN_FORGE_CHUNK_MANAGER(new MixinBuilder("Adds cube-aware Forge chunk loading tickets")
+        .addCommonMixins("common.forge.IForgeChunkManager", "common.forge.MixinTicket")
+        .setPhase(Phase.EARLY)
+        .setApplyIf(() -> true)),
 
     // =============================================================
     // Client Mixins
