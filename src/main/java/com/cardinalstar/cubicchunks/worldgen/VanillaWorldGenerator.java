@@ -407,9 +407,9 @@ public class VanillaWorldGenerator implements IWorldGenerator, IPreloadFailureDe
 
     private Box getCubesToGenerate(int x, int y, int z) {
         if (y >= 0 && y < 16) {
-            return new Box(x - 1, -1, x - 1, x + 1, 16, z + 1);
+            return new Box(x - 1, -1, z - 1, x + 1, 16, z + 1);
         } else {
-            return new Box(x - 1, y - 1, x - 1, x + 1, y + 1, z + 1);
+            return new Box(x - 1, y - 1, z - 1, x + 1, y + 1, z + 1);
         }
     }
 
