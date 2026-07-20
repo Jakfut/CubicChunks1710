@@ -42,6 +42,8 @@ public interface ICubeLoader extends Flushable, Closeable {
             box.getX2() - box.getX1() + 1,
             box.getY2() - box.getY1() + 1,
             box.getZ2() - box.getZ1() + 1);
+
+        box.forEachPoint((x, y, z) -> getCube(x, y, z, effort));
     }
 
     void uncacheCubes();
