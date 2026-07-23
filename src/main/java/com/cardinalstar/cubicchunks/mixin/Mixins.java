@@ -310,6 +310,11 @@ public enum Mixins implements IMixins {
             .setPhase(Phase.LATE)
             .addRequiredMod(Mods.ChunkAPI)
             .setApplyIf(() -> true)),
+    MIXIN_JOURNEYMAP_RENDER_GUARD(new MixinBuilder("Discard incomplete JourneyMap surface renders")
+        .addClientMixins("mod.MixinJourneyMapChunkPainter", "mod.MixinJourneyMapChunkRenderController")
+        .setPhase(Phase.LATE)
+        .addRequiredMod(Mods.JourneyMap)
+        .setApplyIf(() -> true)),
     MIXIN_AE2_PLATFORM_SEND_CHUNK(
         new MixinBuilder("Route AE2 chunk section resends through the cubic synchronization protocol")
             .addCommonMixins("mod.MixinAE2Platform")
